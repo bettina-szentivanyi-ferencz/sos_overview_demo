@@ -1,0 +1,84 @@
+create or replace table sos_overview_masked_v2.calendar_dim
+as
+with cte_weeks as
+(
+select
+	min (calendar_dim.date) as sort_week,
+	calendar_dim.year_week_name
+from demo_masked.calendar_dim
+group by calendar_dim.year_week_name
+	),
+
+cte_qtr as
+(
+select
+	min (calendar_dim.date) as sort_qtr,
+	calendar_dim.year_quarter_no
+from demo_masked.calendar_dim
+group by calendar_dim.year_quarter_no
+	),
+	
+cte_months as
+(
+select
+	min (calendar_dim.date) as sort_month,
+	calendar_dim.year_month_name
+from demo_masked.calendar_dim
+group by calendar_dim.year_month_name
+	),
+
+plan_dim as
+(
+select distinct
+	plan_dim.start_date,
+	plan_dim.end_date,
+	plan_dim.plan_name
+from demo_masked.plan_dim
+where plan_dim.project_name = 'demoi'
+)
+	
+select distinct
+	calendar_dim.date,
+	calendar_dim.year,
+	calendar_dim.quarter_no,
+	calendar_dim.quarter_name,
+	calendar_dim.year_quarter_no,
+	'Q' || calendar_dim.quarter_no || ' ' || calendar_dim.year as year_quarter_name,
+	calendar_dim.year_month_no,
+	calendar_dim.year_week_no,
+	calendar_dim.week_name || ' - ' || calendar_dim.year as year_week_name,
+	format_date ('%b %Y', date (calendar_dim.date)) as year_month_name,
+	calendar_dim.month_no,
+	calendar_dim.month_name,
+	calendar_dim.week_no,
+	calendar_dim.week_name,
+	calendar_dim.day_of_week,
+	calendar_dim.year_month_week,
+	calendar_dim.week_of,
+	calendar_dim.past_year,
+	calendar_dim.past_quarter_no,
+	calendar_dim.past_month_no,
+	calendar_dim.past_week_no,
+	calendar_dim.past_year_quarter_no,
+	calendar_dim.past_year_month_no,
+	calendar_dim.past_year_week_no,
+	calendar_dim.is_current_year,
+	calendar_dim.is_current_quarter,
+	calendar_dim.is_current_month,
+	calendar_dim.is_current_week,
+	calendar_dim.is_current_day,
+	plan_dim.plan_name,
+	plan_dim.start_date,
+	plan_dim.end_date,
+	cte_weeks.sort_week,
+	cte_months.sort_month,
+	cte_qtr.sort_qtr
+from demo_masked.calendar_dim
+cross join plan_dim
+join demo_masked.session_dim on session_dim.visit_date = calendar_dim.date
+join cte_weeks on cte_weeks.year_week_name = calendar_dim.year_week_name
+join cte_months on cte_months.year_month_name = calendar_dim.year_month_name
+join cte_qtr on cte_qtr.year_quarter_no = calendar_dim.year_quarter_no
+where
+	calendar_dim.date between (plan_dim.start_date) and (plan_dim.end_date)
+	and session_dim.project_name = 'demoi'
