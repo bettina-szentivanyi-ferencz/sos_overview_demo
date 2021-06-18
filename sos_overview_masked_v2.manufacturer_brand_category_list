@@ -1,0 +1,12 @@
+create or replace table sos_overview_masked_v2.manufacturer_brand_category_list
+as
+select distinct
+  manufacturer_id,
+  manufacturer_name,
+  manufacturer_name as manufacturer_filter,
+  brand_id, brand_name,
+  category_id,
+  category_name,
+  concat(manufacturer_id, brand_id, category_id) as manufacturer_brand_category_id 
+from sos_overview_masked_v2.product_dim
+where is_latest_version=true and category_name='Health'
