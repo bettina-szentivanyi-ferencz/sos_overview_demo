@@ -1,0 +1,21 @@
+create or replace table sos_overview_masked_v2.store_dim
+as
+
+select
+	store_pk,
+	country_name as country,
+	region_name as region,
+	state_name as state,
+	store_type_name as type,
+	city,
+	retailer_name as retailer,
+	store_type_name as channel,
+	store_name as store_name,
+	store_number as store_number, -- tbd
+	latitude,
+	longitude,
+  	store_id
+from demo_masked.store_dim
+where project_name = 'demoi'
+	and is_latest_version = true
+	and (store_is_test = FALSE OR store_is_test IS NULL)
