@@ -1,0 +1,48 @@
+create or replace table sos_overview_masked_v2.user_hierarchy
+as
+select distinct 
+	hierarchy.child,
+	hierarchy.parent,
+	user_dim.login_name
+from (
+	with cte_supervisors --cte table to list users with their supervisors
+	as
+	(
+	SELECT distinct
+		user_dim.user_pk,
+		report_operational_hierarchy.supervisor_fk 
+	FROM demo_masked.user_dim
+	left join demo_masked.report_operational_hierarchy on user_dim.user_pk = report_operational_hierarchy.sales_rep_fk
+	where user_dim.project_name = 'demoi'
+		and report_operational_hierarchy.supervisor_fk is not null
+	)
+
+	SELECT distinct  --union part 1 to list the indirect supervisor
+		user_dim.user_pk as child,
+		report_operational_hierarchy.supervisor_fk,
+		case
+			when cte_supervisors.supervisor_fk is null and report_operational_hierarchy.supervisor_fk is null then user_dim.user_pk
+			when report_operational_hierarchy.supervisor_fk is not null and cte_supervisors.supervisor_fk is null then report_operational_hierarchy.supervisor_fk
+			when cte_supervisors.supervisor_fk is not null then cte_supervisors.supervisor_fk
+		end as parent
+	FROM demo_masked.user_dim
+	left join demo_masked.report_operational_hierarchy on user_dim.user_pk = report_operational_hierarchy.sales_rep_fk
+	left join cte_supervisors on cte_supervisors.user_pk = report_operational_hierarchy.supervisor_fk
+	where user_dim.project_name = 'demoi'
+		and report_operational_hierarchy.supervisor_fk is not null
+	union all 
+	select distinct --union part 2 to list all users
+		user_dim.user_pk as child,
+		'' as supervisor_fk,
+		user_dim.user_pk as parent
+	FROM demo_masked.user_dim
+	where user_dim.project_name = 'demoi'
+	union all 
+	SELECT distinct --union part 3 to list the direct supervisor
+		cte_supervisors.user_pk as child,
+		'' as supervisor_fk,
+		cte_supervisors.supervisor_fk as parent
+	FROM cte_supervisors) hierarchy
+join demo_masked.user_dim
+on user_dim.user_pk = hierarchy.parent
+order by hierarchy.child
