@@ -1,0 +1,201 @@
+create or replace table sos_overview_masked_v2.fact_table
+as
+
+
+with cte_dim_product --temporary product dim
+as
+(
+select distinct
+	product_dim.product_pk,
+	product_dim.product_uid,
+	product_dim.product_type,
+	product_dim.own,
+	concat(product_dim.manufacturer_id,product_dim.brand_id,product_dim.category_id) as manufacturer_brand_category_id 
+from demo_masked.product_dim
+where project_name = 'demoi' and category_name='Health'
+	and product_type in ('SKU','Other','Empty')
+	and product_uid <> '' 
+),
+	
+cte_kpi_fact --temporary kpi fact table, this calculates the facing/linear if the corresponding KPIs are available in the project
+as
+(
+select
+	kpi_fact.session_fk,
+	kpi_fact.visit_date,
+	kpi_fact.store_fk,
+	kpi_fact.user_fk,
+	kpi_fact.kpi_name,
+	kpi_fact.numerator_id,
+	kpi_fact.project_name || kpi_fact.numerator_id as product_fk,
+	cte_dim_product.own,
+	cte_dim_product.manufacturer_brand_category_id,
+	kpi_fact.numerator_result,
+	sum (case when kpi_fact.kpi_name = 'LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE' then kpi_fact.numerator_result end) as LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator,
+	sum (case when kpi_fact.kpi_name = 'FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE' then kpi_fact.numerator_result end) as FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator,
+from demo_masked.kpi_fact
+join cte_dim_product	on cte_dim_product.product_pk = kpi_fact.project_name || kpi_fact.numerator_id
+where kpi_fact.project_name = 'demoi'
+	and kpi_fact.visit_date >= '2019-01-01'
+	and kpi_fact.kpi_name in
+		('LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE',
+		'FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE')
+group by 
+	kpi_fact.session_fk,
+	kpi_fact.visit_date,
+	kpi_fact.store_fk,
+	kpi_fact.user_fk,
+	kpi_fact.kpi_name,
+	kpi_fact.numerator_id,
+	kpi_fact.project_name || kpi_fact.numerator_id,
+	cte_dim_product.own,
+	cte_dim_product.manufacturer_brand_category_id,
+	kpi_fact.numerator_result
+),
+		
+cte_scene_item_fact --temporary scene item fact table, this calculates the facing/linear based on scene item fact, in case if the Add Stack/Ignore Stack/Split is configured in the project
+as
+(
+select
+	scene_item_fact.session_fk,
+	scene_item_fact.visit_date,
+	scene_item_fact.store_fk,
+	scene_item_fact.user_fk,
+	scene_item_fact.product_fk,
+	cte_dim_product.own,
+	cte_dim_product.manufacturer_brand_category_id,
+	scene_item_fact.facing_sos_calc,
+	scene_item_fact.linear_sos_calc,
+	scene_item_fact.rlv_sos_sc,
+	sum (scene_item_fact.facings) as facings,
+	sum (scene_item_fact.facings_ign_stack) as facings_ign_stack,
+	sum (scene_item_fact.gross_len_add_stack) as gross_len_add_stack,
+	sum (scene_item_fact.gross_len_ign_stack) as gross_len_ign_stack,
+	sum (scene_item_fact.gross_len_split_stack) as gross_len_split_stack,
+	case when scene_item_fact.facing_sos_calc = 'Add stacked' then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.facings) end as facings_with_stacking,
+	case when scene_item_fact.facing_sos_calc = 'Add stacked' and cte_dim_product.own = true then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.facings) end as own_facings_with_stacking,
+	case when scene_item_fact.facing_sos_calc = 'Ignore Stacked' then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.facings_ign_stack) end as facings_ignore_stacking,
+	case when scene_item_fact.facing_sos_calc = 'Ignore Stacked' and cte_dim_product.own = true then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.facings_ign_stack) end as own_facings_ignore_stacking,
+	case when scene_item_fact.linear_sos_calc = 'Additional Shelf Length' then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.gross_len_add_stack) end as Linear_add_stacking,
+	case when scene_item_fact.linear_sos_calc = 'Additional Shelf Length' and cte_dim_product.own = true then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.gross_len_add_stack) end as own_Linear_add_stacking,
+	case when scene_item_fact.linear_sos_calc = 'Ignore Stacked' then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.gross_len_ign_stack) end as Linear_ignore_stacking,
+	case when scene_item_fact.linear_sos_calc = 'Ignore Stacked' and cte_dim_product.own = true then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.gross_len_ign_stack) end as own_Linear_ignore_stacking,
+	case when scene_item_fact.linear_sos_calc = 'Split' then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.gross_len_split_stack) end as Linear_split_stacking,
+	case when scene_item_fact.linear_sos_calc = 'Split' and cte_dim_product.own = true then sum (cast (scene_item_fact.rlv_sos_sc as int64) * scene_item_fact.gross_len_split_stack) end as own_Linear_split_stacking
+from demo_masked.scene_item_fact
+join cte_dim_product on cte_dim_product.product_pk = scene_item_fact.product_fk
+where scene_item_fact.project_name = 'demoi'
+	and scene_item_fact.visit_date >= '2019-01-01'
+group by 
+	scene_item_fact.session_fk,
+	scene_item_fact.visit_date,
+	scene_item_fact.store_fk,
+	scene_item_fact.user_fk,
+	scene_item_fact.product_fk,
+	cte_dim_product.own,
+	cte_dim_product.manufacturer_brand_category_id,
+	scene_item_fact.facing_sos_calc,
+	scene_item_fact.linear_sos_calc,
+	scene_item_fact.rlv_sos_sc
+),
+
+cte_session_dim --temporary scene item fact table, this calculates the facing/linear based on scene item fact, in case if the Add Stack/Ignore Stack/Split is configured in the project
+as
+(
+select distinct
+	session_dim.session_pk,
+	session_dim.session_explorer_url
+from  demo_masked.session_dim
+where session_dim.project_name = 'demoi'
+	and session_dim.visit_date >= '2019-01-01'
+)
+	
+select --final query, it decides how the facing/linear should be calculated, based on the available KPIs in the project
+	nested.session_fk,
+	nested.visit_date,
+	nested.store_fk,
+	nested.user_fk,
+	nested.product_fk,
+	nested.manufacturer_brand_category_id,
+	cte_session_dim.session_explorer_url,
+	count(distinct(nested.session_fk)) as session_count,
+	case
+		when sum (nested.LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator) is not null then sum(nested.LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator)
+		when sum (nested.LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator) is null then coalesce(sum(nested.Linear_add_stacking),0) + coalesce(sum(nested.Linear_ignore_stacking),0) + coalesce(sum(nested.Linear_split_stacking),0) 
+	end as linear,
+	case
+		when sum (nested.FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator) is not null then sum(nested.FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator)
+		when sum (nested.FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator) is null then coalesce(sum(nested.own_Linear_add_stacking),0) + coalesce(sum(nested.own_Linear_ignore_stacking),0) + coalesce(sum(nested.own_Linear_split_stacking),0) 
+	end as facings
+from
+(select --nested statement, union part 1
+	cte_kpi_fact.session_fk,
+	cte_kpi_fact.visit_date,
+	cte_kpi_fact.store_fk,
+	cte_kpi_fact.user_fk,
+	cte_kpi_fact.product_fk,
+	cte_kpi_fact.manufacturer_brand_category_id,
+	sum (cte_kpi_fact.LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator) as LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator,
+	sum (cte_kpi_fact.FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator) as FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator,
+	null as facings_with_stacking,
+	null as own_facings_with_stacking,
+	null as facings_ignore_stacking,
+	null as own_facings_ignore_stacking,
+	null as Linear_add_stacking,
+	null as own_Linear_add_stacking,
+	null as Linear_ignore_stacking,
+	null as own_Linear_ignore_stacking,
+	null as Linear_split_stacking,
+	null as own_Linear_split_stacking
+from cte_kpi_fact
+group by 
+	cte_kpi_fact.session_fk,
+	cte_kpi_fact.visit_date,
+	cte_kpi_fact.store_fk,
+	cte_kpi_fact.user_fk,
+	cte_kpi_fact.product_fk,
+	cte_kpi_fact.manufacturer_brand_category_id	
+union all
+select --nested statement, union part 2
+	cte_scene_item_fact.session_fk,
+	cte_scene_item_fact.visit_date,
+	cte_scene_item_fact.store_fk,
+	cte_scene_item_fact.user_fk,
+	cte_scene_item_fact.product_fk,
+	  cte_scene_item_fact.manufacturer_brand_category_id,
+	null as LINEAR_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator,
+	null as FACINGS_SOS_SKU_OUT_OF_CATEGORY_IN_WHOLE_STORE_numerator,
+	sum (cte_scene_item_fact.facings_with_stacking) as facings_with_stacking,
+	sum (cte_scene_item_fact.own_facings_with_stacking) as own_facings_with_stacking,
+	sum (cte_scene_item_fact.facings_ignore_stacking) as facings_ignore_stacking,
+	sum (cte_scene_item_fact.own_facings_ignore_stacking) as own_facings_ignore_stacking,
+	sum (cte_scene_item_fact.Linear_add_stacking) as Linear_add_stacking,
+	sum (cte_scene_item_fact.own_Linear_add_stacking) as own_Linear_add_stacking,
+	sum (cte_scene_item_fact.Linear_ignore_stacking) as Linear_ignore_stacking,
+	sum (cte_scene_item_fact.own_Linear_ignore_stacking) as own_Linear_ignore_stacking,
+	sum (cte_scene_item_fact.Linear_split_stacking) as Linear_split_stacking,
+	sum (cte_scene_item_fact.own_Linear_split_stacking) as own_Linear_split_stacking	
+from cte_scene_item_fact
+group by
+	cte_scene_item_fact.session_fk,
+	cte_scene_item_fact.visit_date,
+	cte_scene_item_fact.store_fk,
+	cte_scene_item_fact.user_fk,
+	cte_scene_item_fact.product_fk,
+	cte_scene_item_fact.manufacturer_brand_category_id) nested
+left join cte_session_dim on cte_session_dim.session_pk=nested.session_fk
+group by 
+	nested.session_fk,
+ 	cte_session_dim.session_explorer_url,
+	nested.visit_date,
+	nested.store_fk,
+	nested.user_fk,
+	nested.product_fk,
+	nested.manufacturer_brand_category_id
+order by 
+	nested.session_fk,
+	cte_session_dim.session_explorer_url,
+	nested.visit_date,
+	nested.store_fk,
+	nested.user_fk,
+  	nested.manufacturer_brand_category_id
