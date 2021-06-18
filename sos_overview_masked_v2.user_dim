@@ -1,0 +1,12 @@
+
+create or replace table sos_overview_masked_v2.user_dim
+as
+
+select
+	user_pk,
+	trim (first_name || ' ' || last_name) as sales_rep,
+	supervisor_id, --tbd
+	supervisor_login_name, --tbd
+	supervisor_full_name --tbd
+from demo_masked.user_dim
+where project_name = 'demoi'
