@@ -1,0 +1,21 @@
+create or replace table sos_overview_masked_v2.agg_store_user_fact
+as
+
+
+
+select
+	fact_table.visit_date,
+	fact_table.user_fk,
+	fact_table.store_fk,
+	sum (fact_table.facings) as facing,
+	sum (fact_table.linear) as linear,
+	count (distinct (fact_table.session_fk)) as session_count
+from sos_overview_masked_v2.fact_table
+group by 
+	fact_table.visit_date,
+	fact_table.store_fk,
+	fact_table.user_fk
+order by 
+	fact_table.visit_date,
+	fact_table.store_fk,
+	fact_table.user_fk
