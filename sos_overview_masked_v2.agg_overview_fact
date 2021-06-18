@@ -1,0 +1,42 @@
+create or replace table sos_overview_masked_v2.agg_overview_fact
+as
+
+with product_dim as
+(
+select  manufacturer_id,
+	brand_id,
+	category_id,
+	product_pk, 
+	concat(manufacturer_id, brand_id, category_id) as manufacturer_brand_category_id 
+from sos_overview_masked_v2.product_dim
+)
+
+select
+	fact_table.visit_date,
+	fact_table.user_fk,
+	fact_table.store_fk,
+	product_dim.manufacturer_id,
+	product_dim.brand_id,
+	product_dim.category_id,
+	product_dim.manufacturer_brand_category_id,
+	sum (fact_table.facings) as facing,
+	sum (fact_table.linear) as linear,
+	count(distinct(fact_table.session_fk)) as session_count
+from sos_overview_masked_v2.fact_table
+left join product_dim on fact_table.product_fk = product_dim.product_pk
+group by 
+	fact_table.visit_date,
+	fact_table.store_fk,
+	fact_table.user_fk,
+	manufacturer_brand_category_id,
+	product_dim.manufacturer_id,
+  	product_dim.brand_id,
+  	product_dim.category_id
+order by 
+	fact_table.visit_date,
+	fact_table.store_fk,
+	fact_table.user_fk,
+	manufacturer_brand_category_id,
+	product_dim.manufacturer_id,
+	product_dim.brand_id,
+	product_dim.category_id
